@@ -21,7 +21,7 @@ export default async function HomePage() {
           </p>
           <div className="ctaRow">
             <Link className="button" href="/signin">
-              Start with email sign-in
+              Start with username sign-in
             </Link>
             <a className="button secondary" href="#how-it-works">
               See the workflow
@@ -39,8 +39,8 @@ export default async function HomePage() {
               <div className="muted">No tables, no columns, no decorative layout tricks.</div>
             </div>
             <div className="card">
-              <div className="statValue">Approval-first</div>
-              <div className="muted">Default mode keeps humans in the loop before submission.</div>
+              <div className="statValue">Prototype auth</div>
+              <div className="muted">Simple username/password onboarding with no email verification.</div>
             </div>
           </div>
         </div>

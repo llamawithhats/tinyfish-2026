@@ -1,49 +1,45 @@
 import NextAuth from "next-auth";
-import Email from "next-auth/providers/nodemailer";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import nodemailer from "nodemailer";
+import Credentials from "next-auth/providers/credentials";
 import { getEnv } from "@autointern/config";
 import { prisma } from "./prisma";
+import { verifyPassword } from "./passwords";
 
 const env = getEnv();
 
-const transport = nodemailer.createTransport({
-  host: env.SMTP_HOST,
-  port: env.SMTP_PORT,
-  secure: false,
-  auth: env.SMTP_USER
-    ? {
-        user: env.SMTP_USER,
-        pass: env.SMTP_PASSWORD
-      }
-    : undefined
-});
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
   session: {
-    strategy: "database"
+    strategy: "jwt"
   },
   providers: [
-    Email({
-      server: {
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        auth: env.SMTP_USER
-          ? {
-              user: env.SMTP_USER,
-              pass: env.SMTP_PASSWORD
-            }
-          : undefined
+    Credentials({
+      name: "Username and Password",
+      credentials: {
+        username: { label: "Username", type: "text" },
+        password: { label: "Password", type: "password" }
       },
-      from: env.SMTP_FROM,
-      async sendVerificationRequest({ identifier, url, provider }) {
-        await transport.sendMail({
-          to: identifier,
-          from: provider.from,
-          subject: "Sign in to AutoIntern",
-          text: `Sign in to AutoIntern by opening this link: ${url}`
+      async authorize(credentials) {
+        const username = String(credentials?.username ?? "").trim().toLowerCase();
+        const password = String(credentials?.password ?? "");
+
+        if (!username || !password) {
+          return null;
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { username }
         });
+
+        if (!user?.passwordHash || !verifyPassword(password, user.passwordHash)) {
+          return null;
+        }
+
+        return {
+          id: user.id,
+          name: user.name ?? user.username,
+          email: user.email,
+          username: user.username,
+          submissionMode: user.submissionMode
+        };
       }
     })
   ],
@@ -53,13 +49,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: env.AUTH_SECRET,
   trustHost: env.AUTH_TRUST_HOST === "true",
   callbacks: {
-    async session({ session, user }) {
-      session.user.id = user.id;
-      const dbUser = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { submissionMode: true }
-      });
-      session.user.submissionMode = dbUser?.submissionMode ?? "APPROVAL_FIRST";
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.submissionMode = (user as { submissionMode?: "APPROVAL_FIRST" | "AUTO_SUBMIT" }).submissionMode ?? "APPROVAL_FIRST";
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      session.user.id = String(token.id);
+      session.user.submissionMode =
+        token.submissionMode === "AUTO_SUBMIT" ? "AUTO_SUBMIT" : "APPROVAL_FIRST";
       return session;
     }
   }

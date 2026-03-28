@@ -12,7 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="panel" style={{ marginBottom: 18 }}>
         <div className="metaRow" style={{ justifyContent: "space-between" }}>
           <div>
-            <div className="pill">Signed in as {session.user.email}</div>
+            <div className="pill">Signed in as {session.user.name ?? session.user.email ?? "prototype user"}</div>
           </div>
           <form
             action={async () => {

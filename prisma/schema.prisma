@@ -56,7 +56,9 @@ enum ApplicationRunType {
 model User {
   id               String               @id @default(cuid())
   name             String?
-  email            String               @unique
+  username         String               @unique
+  email            String?              @unique
+  passwordHash     String?
   emailVerified    DateTime?
   image            String?
   submissionMode   SubmissionMode       @default(APPROVAL_FIRST)

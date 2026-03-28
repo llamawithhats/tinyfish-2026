@@ -5,7 +5,8 @@ import { useMemo, useState, useTransition } from "react";
 type DashboardData = {
   user: {
     id: string;
-    email: string;
+    email: string | null;
+    name: string | null;
     submissionMode: "APPROVAL_FIRST" | "AUTO_SUBMIT";
   };
   profile: Record<string, unknown> | null;
@@ -45,7 +46,7 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
     return {
       fullName: String(profile.fullName ?? ""),
       headline: String(profile.headline ?? ""),
-      email: String(profile.email ?? data.user.email),
+      email: String(profile.email ?? data.user.email ?? ""),
       phone: String(profile.phone ?? ""),
       linkedinUrl: String(profile.linkedinUrl ?? ""),
       githubUrl: String(profile.githubUrl ?? ""),
@@ -204,7 +205,9 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
               <h1 className="sectionTitle" style={{ marginBottom: 6 }}>
                 Candidate profile
               </h1>
-              <p className="muted">This profile powers tailored resumes, cover letters, and form filling.</p>
+              <p className="muted">
+                This profile powers tailored resumes, cover letters, and form filling for {data.user.name ?? "your"} account.
+              </p>
             </div>
             <button className="button secondary" onClick={toggleMode} type="button">
               Mode: {data.user.submissionMode}

@@ -14,6 +14,7 @@ export default async function DashboardPage() {
       select: {
         id: true,
         email: true,
+        name: true,
         submissionMode: true
       }
     }),

@@ -1,5 +1,6 @@
 import type { SubmissionMode } from "@autointern/domain";
 import type { DefaultSession } from "next-auth";
+import type { JWT } from "next-auth/jwt";
 
 declare module "next-auth" {
   interface Session {
@@ -7,5 +8,12 @@ declare module "next-auth" {
       id: string;
       submissionMode: SubmissionMode;
     };
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    id?: string;
+    submissionMode?: SubmissionMode;
   }
 }

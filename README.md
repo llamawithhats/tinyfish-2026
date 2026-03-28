@@ -2,7 +2,7 @@
 
 TinyFish-powered internship application automation for ATS-hosted job pages. The stack is a Dockerized TypeScript monorepo with:
 
-- `apps/web`: Next.js dashboard, Auth.js magic-link auth, and queueing API routes
+- `apps/web`: Next.js dashboard, prototype username/password auth, and queueing API routes
 - `apps/worker`: BullMQ workers for discovery, packet generation, and submission
 - `packages/*`: shared domain contracts, env/config, TinyFish client, prompt builders, PDF renderer, and object storage helpers
 - `prisma/schema.prisma`: the multi-user data model for profiles, credentials, sources, jobs, packets, runs, and audit events
@@ -30,33 +30,43 @@ The resume prompt and renderer both enforce:
 
 1. Copy `.env.example` to `.env`.
 2. Fill in `AUTH_SECRET`, `ENCRYPTION_KEY`, `TINYFISH_API_KEY`, and `LLM_API_KEY`.
-3. Install dependencies:
+3. Username/password auth is enabled by default for the prototype, so SMTP is optional unless you want to switch back to email links later.
+4. Install dependencies:
 
 ```bash
 npm install
 ```
 
-4. Generate Prisma client and apply the schema:
+5. Generate Prisma client and apply the schema:
 
 ```bash
 npx prisma generate
 npx prisma db push
 ```
 
-5. Start the website and worker in separate terminals:
+6. Start the website and worker in separate terminals:
 
 ```bash
 npm run dev:web
 npm run dev:worker
 ```
 
-6. Or boot the full local stack with Docker:
+7. Or boot the full local stack with Docker:
 
 ```bash
-docker compose up --build
+npm run docker:up
 ```
 
-Mail preview lives at `http://localhost:8025`, the app at `http://localhost:3000`, and MinIO console at `http://localhost:9001`.
+The app lives at `http://localhost:3000`, Mailpit is still available at `http://localhost:8025` if you want it, and the MinIO console is at `http://localhost:9001`.
+
+If your terminal cannot find Docker Desktop's credential helper, use the repo wrapper commands instead of raw `docker compose`:
+
+```bash
+npm run docker:up
+npm run docker:ps
+npm run docker:logs
+npm run docker:down
+```
 
 ## Key API routes
 

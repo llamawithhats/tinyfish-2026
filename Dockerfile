@@ -7,6 +7,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY packages/config/package.json packages/config/package.json
@@ -17,7 +18,7 @@ COPY packages/prompts/package.json packages/prompts/package.json
 COPY packages/storage/package.json packages/storage/package.json
 COPY packages/tinyfish/package.json packages/tinyfish/package.json
 
-RUN npm install
+RUN npm ci
 
 COPY . .
 
