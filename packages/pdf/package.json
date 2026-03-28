@@ -1,0 +1,13 @@
+{
+  "name": "@autointern/pdf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@autointern/domain": "*",
+    "playwright": "^1.55.0"
+  }
+}

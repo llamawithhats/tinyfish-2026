@@ -1,0 +1,272 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SubmissionMode {
+  APPROVAL_FIRST
+  AUTO_SUBMIT
+}
+
+enum CredentialScope {
+  ATS
+  JOB_BOARD
+  OTHER
+}
+
+enum JobSourceProvider {
+  GREENHOUSE
+  LEVER
+  ASHBY
+  WORKABLE
+  GENERIC_ATS
+}
+
+enum JobListingStatus {
+  DISCOVERED
+  MATCHED
+  SKIPPED
+  PACKET_QUEUED
+  READY_FOR_REVIEW
+  APPLYING
+  APPLIED
+  MANUAL_ACTION_REQUIRED
+  FAILED
+}
+
+enum ApplicationRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  MANUAL_ACTION_REQUIRED
+  CANCELLED
+}
+
+enum ApplicationRunType {
+  DISCOVERY
+  PACKET
+  APPLY
+}
+
+model User {
+  id               String               @id @default(cuid())
+  name             String?
+  email            String               @unique
+  emailVerified    DateTime?
+  image            String?
+  submissionMode   SubmissionMode       @default(APPROVAL_FIRST)
+  accounts         Account[]
+  sessions         Session[]
+  profile          UserProfile?
+  providerCredentials ProviderCredential[]
+  searchPresets    SearchPreset[]
+  jobSources       JobSource[]
+  jobListings      JobListing[]
+  applicationPackets ApplicationPacket[]
+  applicationRuns  ApplicationRun[]
+  auditEvents      AuditEvent[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+}
+
+model UserProfile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  fullName           String
+  headline           String
+  email              String
+  phone              String
+  linkedinUrl        String?
+  githubUrl          String?
+  portfolioUrl       String?
+  currentLocation    String
+  workAuthorization  String
+  visaStatus         String?
+  graduationDate     String?
+  targetRoles        String[]
+  preferredLocations String[]
+  salaryExpectation  String?
+  availability       String?
+  summary            String
+  skills             Json
+  screeningFacts     Json
+  education          Json
+  experiences        Json
+  projects           Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ProviderCredential {
+  id              String          @id @default(cuid())
+  userId          String
+  provider        String
+  label           String
+  scope           CredentialScope @default(ATS)
+  username        String?
+  encryptedSecret String
+  metadata        Json
+  lastValidatedAt DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider])
+}
+
+model SearchPreset {
+  id                   String      @id @default(cuid())
+  userId               String
+  name                 String
+  companies            String[]
+  keywords             String[]
+  locations            String[]
+  internshipOnly       Boolean     @default(true)
+  maxDailyApplications Int         @default(10)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobSources           JobSource[]
+}
+
+model JobSource {
+  id                   String            @id @default(cuid())
+  userId               String
+  searchPresetId       String?
+  name                 String
+  provider             JobSourceProvider
+  sourceUrl            String
+  keywords             String[]
+  locations            String[]
+  countryCode          String?
+  internshipOnly       Boolean           @default(true)
+  maxDailyApplications Int               @default(10)
+  enabled              Boolean           @default(true)
+  lastScannedAt        DateTime?
+  nextScanAt           DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  searchPreset         SearchPreset?     @relation(fields: [searchPresetId], references: [id], onDelete: SetNull)
+  listings             JobListing[]
+}
+
+model JobListing {
+  id                      String           @id @default(cuid())
+  userId                  String
+  jobSourceId             String
+  provider                JobSourceProvider
+  externalId              String?
+  title                   String
+  companyName             String
+  location                String?
+  descriptionMarkdown     String
+  canonicalApplicationUrl String
+  matchingKeywords        String[]
+  internshipScore         Float
+  compensationHint        String?
+  status                  JobListingStatus @default(DISCOVERED)
+  rawJson                 Json
+  discoveredAt            DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+  user                    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobSource               JobSource        @relation(fields: [jobSourceId], references: [id], onDelete: Cascade)
+  packet                  ApplicationPacket?
+  applicationRuns         ApplicationRun[]
+
+  @@unique([userId, canonicalApplicationUrl])
+  @@index([userId, status])
+}
+
+model ApplicationPacket {
+  id                  String           @id @default(cuid())
+  userId              String
+  jobListingId        String           @unique
+  resumeSpec          Json
+  coverLetterText     String
+  screeningAnswers    Json
+  essayResponses      Json
+  resumeObjectKey     String
+  coverLetterObjectKey String?
+  answersObjectKey    String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobListing          JobListing       @relation(fields: [jobListingId], references: [id], onDelete: Cascade)
+  applicationRuns     ApplicationRun[]
+}
+
+model ApplicationRun {
+  id                  String               @id @default(cuid())
+  userId              String
+  jobListingId        String
+  applicationPacketId String?
+  runType             ApplicationRunType
+  tinyfishRunId       String?
+  status              ApplicationRunStatus @default(PENDING)
+  result              Json?
+  errorCode           String?
+  errorMessage        String?
+  screenshotKeys      String[]
+  createdAt           DateTime             @default(now())
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobListing          JobListing           @relation(fields: [jobListingId], references: [id], onDelete: Cascade)
+  applicationPacket   ApplicationPacket?   @relation(fields: [applicationPacketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, runType, status])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  userId     String
+  entityType String
+  entityId   String
+  action     String
+  metadata   Json
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, entityType, entityId])
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@id([identifier, token])
+}

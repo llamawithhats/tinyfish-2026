@@ -1,0 +1,14 @@
+{
+  "name": "@autointern/tinyfish",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@autointern/config": "*",
+    "@autointern/domain": "*",
+    "zod": "^3.24.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@autointern/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@autointern/config": "*",
+    "@autointern/domain": "*",
+    "@autointern/llm": "*",
+    "@autointern/pdf": "*",
+    "@autointern/prompts": "*",
+    "@autointern/storage": "*",
+    "@autointern/tinyfish": "*",
+    "@prisma/client": "^6.0.0",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.7.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}

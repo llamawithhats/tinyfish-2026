@@ -1,0 +1,28 @@
+{
+  "name": "autointern",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @autointern/web",
+    "dev:web": "npm run dev --workspace @autointern/web",
+    "dev:worker": "npm run dev --workspace @autointern/worker",
+    "build": "npm run build --workspace @autointern/web && npm run build --workspace @autointern/worker",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.0.0",
+    "prisma": "^6.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

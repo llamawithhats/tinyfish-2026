@@ -1,0 +1,14 @@
+{
+  "name": "@autointern/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@autointern/config": "*",
+    "@aws-sdk/client-s3": "^3.821.0",
+    "@aws-sdk/s3-request-presigner": "^3.821.0"
+  }
+}
