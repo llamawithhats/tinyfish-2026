@@ -17,6 +17,7 @@ const envSchema = z.object({
   TINYFISH_DEFAULT_COUNTRY: z.string().length(2).default("US"),
   ENCRYPTION_KEY: z.string().min(16),
   STORAGE_ENDPOINT: z.string().url(),
+  STORAGE_PUBLIC_ENDPOINT: z.string().url().optional().or(z.literal("")).default(""),
   STORAGE_REGION: z.string().min(1),
   STORAGE_ACCESS_KEY_ID: z.string().min(1),
   STORAGE_SECRET_ACCESS_KEY: z.string().min(1),

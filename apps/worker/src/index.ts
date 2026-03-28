@@ -4,7 +4,6 @@ import { Worker } from "bullmq";
 import { prisma } from "./prisma";
 import { discoverJobsForSource } from "./jobs/discover-jobs";
 import { generateApplicationPacket } from "./jobs/generate-packet";
-import { submitApplication } from "./jobs/submit-application";
 import { discoverJobsQueue, redisConnection } from "./queues";
 
 getEnv();
@@ -14,7 +13,13 @@ const discoveryWorker = new Worker(
   async (job) => {
     await discoverJobsForSource(job.data.jobSourceId);
   },
-  { connection: redisConnection, concurrency: 2 }
+  {
+    connection: redisConnection,
+    concurrency: 2,
+    lockDuration: 10 * 60 * 1000,
+    stalledInterval: 60 * 1000,
+    maxStalledCount: 0
+  }
 );
 
 const packetWorker = new Worker(
@@ -22,18 +27,16 @@ const packetWorker = new Worker(
   async (job) => {
     await generateApplicationPacket(job.data.jobListingId);
   },
-  { connection: redisConnection, concurrency: 2 }
+  {
+    connection: redisConnection,
+    concurrency: 2,
+    lockDuration: 10 * 60 * 1000,
+    stalledInterval: 60 * 1000,
+    maxStalledCount: 0
+  }
 );
 
-const submitWorker = new Worker(
-  queueNames.submitApplication,
-  async (job) => {
-    await submitApplication(job.data.applicationPacketId);
-  },
-  { connection: redisConnection, concurrency: 1 }
-);
-
-const workers = [discoveryWorker, packetWorker, submitWorker];
+const workers = [discoveryWorker, packetWorker];
 
 async function scheduleDueSources() {
   const dueSources = await prisma.jobSource.findMany({

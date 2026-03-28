@@ -54,14 +54,12 @@ export async function generateStructuredObject<TSchema extends ZodTypeAny>({
     },
     body: JSON.stringify({
       model: env.LLM_MODEL,
-      temperature,
-      response_format: { type: "json_object" },
       messages
     })
   });
 
   if (!response.ok) {
-    throw new Error(`LLM request failed with status ${response.status}`);
+    throw await buildLlmRequestError(response);
   }
 
   const payload = (await response.json()) as ChatCompletionResponse;
@@ -73,6 +71,42 @@ export async function generateStructuredObject<TSchema extends ZodTypeAny>({
 
   const parsed = JSON.parse(extractJsonBlock(content));
   return schema.parse(parsed);
+}
+
+async function buildLlmRequestError(response: Response): Promise<Error> {
+  const contentType = response.headers.get("content-type") ?? "";
+  let details = "";
+
+  try {
+    if (contentType.includes("application/json")) {
+      details = JSON.stringify(await response.json());
+    } else {
+      details = (await response.text()).trim();
+    }
+  } catch {
+    details = "";
+  }
+
+  const diagnostics = {
+    requestId: response.headers.get("x-request-id"),
+    retryAfter: response.headers.get("retry-after"),
+    limitRequests: response.headers.get("x-ratelimit-limit-requests"),
+    remainingRequests: response.headers.get("x-ratelimit-remaining-requests"),
+    resetRequests: response.headers.get("x-ratelimit-reset-requests"),
+    limitTokens: response.headers.get("x-ratelimit-limit-tokens"),
+    remainingTokens: response.headers.get("x-ratelimit-remaining-tokens"),
+    resetTokens: response.headers.get("x-ratelimit-reset-tokens")
+  };
+
+  const compactDiagnostics = Object.fromEntries(Object.entries(diagnostics).filter(([, value]) => value));
+  const diagnosticText =
+    Object.keys(compactDiagnostics).length > 0 ? ` diagnostics=${JSON.stringify(compactDiagnostics)}` : "";
+
+  return new Error(
+    details
+      ? `LLM request failed with status ${response.status}: ${details}${diagnosticText}`
+      : `LLM request failed with status ${response.status}${diagnosticText}`
+  );
 }
 
 export async function generateText(messages: LlmMessage[], temperature = 0.3): Promise<string> {

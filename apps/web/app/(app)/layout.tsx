@@ -1,3 +1,4 @@
+import { AppTabs } from "../../components/app-tabs";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "../../lib/auth";
 
@@ -24,6 +25,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               Sign out
             </button>
           </form>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <AppTabs />
         </div>
       </div>
       {children}

@@ -176,7 +176,7 @@ export const jobListingExtractionSchema = z.object({
   canonical_application_url: z.string().url(),
   job_description_markdown: z.string().min(1),
   matching_keywords: z.array(z.string()).default([]),
-  compensation_hint: z.string().optional().default("")
+  compensation_hint: z.string().nullable().optional().default("")
 });
 
 export const jobListingBatchResultSchema = z.object({

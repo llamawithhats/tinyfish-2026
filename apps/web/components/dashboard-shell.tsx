@@ -7,7 +7,6 @@ type DashboardData = {
     id: string;
     email: string | null;
     name: string | null;
-    submissionMode: "APPROVAL_FIRST" | "AUTO_SUBMIT";
   };
   profile: Record<string, unknown> | null;
   credentials: Array<{ id: string; provider: string; label: string; username: string | null }>;
@@ -20,15 +19,33 @@ type DashboardData = {
     location: string | null;
     status: string;
     internshipScore: number;
+    isSynthetic: boolean;
   }>;
   applications: Array<{
     id: string;
+    jobId: string;
+    packetId: string | null;
     companyName: string;
     title: string;
     status: string;
+    hasMaterials: boolean;
     createdAt: string;
   }>;
+  runs: Array<{
+    id: string;
+    runType: string;
+    status: string;
+    tinyfishRunId: string | null;
+    errorMessage: string | null;
+    createdAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+    jobTitle: string;
+    companyName: string;
+  }>;
 };
+
+const MAX_ITEMS_PER_SECTION = 5;
 
 function parseTags(value: string): string[] {
   return value
@@ -37,9 +54,104 @@ function parseTags(value: string): string[] {
     .filter(Boolean);
 }
 
+const supportedProxyCountryCodes = new Set(["US", "GB", "CA", "DE", "FR", "JP", "AU"]);
+
+function formatRunType(runType: string): string {
+  switch (runType) {
+    case "DISCOVERY":
+      return "Discovery";
+    case "PACKET":
+      return "Materials";
+    case "APPLY":
+      return "Legacy apply";
+    default:
+      return runType;
+  }
+}
+
+function formatMaterialsStatus(status: string): string {
+  switch (status) {
+    case "PACKET_QUEUED":
+      return "Generating resume and cover letter";
+    case "READY_FOR_REVIEW":
+      return "Materials ready";
+    case "FAILED":
+      return "Generation failed";
+    default:
+      return status;
+  }
+}
+
+function getTinyFishStreamingUrl(runId: string): string {
+  return `https://stream.agent.tinyfish.ai/session/${encodeURIComponent(runId)}`;
+}
+
+function summarizeError(message: string): string {
+  const firstLine = message.split(/\r?\n/, 1)[0]?.trim() ?? "";
+
+  if (firstLine.length <= 220) {
+    return firstLine;
+  }
+
+  return `${firstLine.slice(0, 217)}...`;
+}
+
+function validateSourceInput(provider: string, sourceUrl: string, countryCode: string): string | null {
+  let hostname = "";
+
+  try {
+    hostname = new URL(sourceUrl).hostname.toLowerCase();
+  } catch {
+    return "Enter a valid ATS listing URL.";
+  }
+
+  if (provider === "GREENHOUSE" && !hostname.includes("greenhouse.io")) {
+    return "Greenhouse sources should use a greenhouse.io board URL.";
+  }
+
+  if (provider === "LEVER" && !hostname.includes("lever.co")) {
+    return "Lever sources should use a lever.co listings URL.";
+  }
+
+  if (provider === "ASHBY" && !hostname.includes("ashbyhq.com")) {
+    return "Ashby sources should use an ashbyhq.com jobs URL.";
+  }
+
+  if (provider === "WORKABLE" && !hostname.includes("workable.com")) {
+    return "Workable sources should use a workable.com jobs URL.";
+  }
+
+  if (countryCode) {
+    const normalized = countryCode.trim().toUpperCase();
+    if (!supportedProxyCountryCodes.has(normalized)) {
+      return `Country code must be one of: ${Array.from(supportedProxyCountryCodes).join(", ")}.`;
+    }
+  }
+
+  return null;
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+        ? payload.error
+        : "Request failed.";
+    throw new Error(message);
+  }
+
+  return payload as T;
+}
+
 export function DashboardShell({ initialData }: { initialData: DashboardData }) {
   const [data, setData] = useState(initialData);
   const [notice, setNotice] = useState<string>("");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(
+    initialData.runs.find((run) => run.tinyfishRunId)?.tinyfishRunId ?? null
+  );
+  const [activeAction, setActiveAction] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const profilePrefill = useMemo(() => {
     const profile = (data.profile ?? {}) as Record<string, unknown>;
@@ -61,19 +173,51 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
       preferredLocations: Array.isArray(profile.preferredLocations) ? (profile.preferredLocations as string[]).join(", ") : ""
     };
   }, [data.profile, data.user.email]);
+  const selectedRun = data.runs.find((run) => run.tinyfishRunId === selectedRunId) ?? null;
+  const visibleCredentials = data.credentials.slice(0, MAX_ITEMS_PER_SECTION);
+  const visibleSearchPresets = data.searchPresets.slice(0, MAX_ITEMS_PER_SECTION);
+  const visibleJobSources = data.jobSources.slice(0, MAX_ITEMS_PER_SECTION);
+  const visibleRuns = data.runs.slice(0, MAX_ITEMS_PER_SECTION);
+  const visibleJobs = data.jobs.slice(0, MAX_ITEMS_PER_SECTION);
+  const visibleApplications = data.applications.slice(0, MAX_ITEMS_PER_SECTION);
+
+  function isActionPending(action: string) {
+    return pending && activeAction === action;
+  }
+
+  function runAction(action: string, loadingMessage: string, task: () => Promise<void>) {
+    setActiveAction(action);
+    setNotice(loadingMessage);
+    startTransition(async () => {
+      try {
+        await task();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Request failed.");
+      } finally {
+        setActiveAction((current) => (current === action ? null : current));
+      }
+    });
+  }
+
+  async function loadDashboardData() {
+    const [jobs, applications, runs] = await Promise.all([
+      fetch("/api/jobs", { cache: "no-store" }).then((res) => readJsonResponse<DashboardData["jobs"]>(res)),
+      fetch("/api/applications", { cache: "no-store" }).then((res) => readJsonResponse<DashboardData["applications"]>(res)),
+      fetch("/api/runs", { cache: "no-store" }).then((res) => readJsonResponse<DashboardData["runs"]>(res))
+    ]);
+
+    setData((current) => ({
+      ...current,
+      jobs,
+      applications,
+      runs
+    }));
+  }
 
   function refresh() {
-    startTransition(async () => {
-      const [jobs, applications] = await Promise.all([
-        fetch("/api/jobs", { cache: "no-store" }).then((res) => res.json()),
-        fetch("/api/applications", { cache: "no-store" }).then((res) => res.json())
-      ]);
-
-      setData((current) => ({
-        ...current,
-        jobs,
-        applications
-      }));
+    runAction("refresh", "Refreshing dashboard...", async () => {
+      await loadDashboardData();
+      setNotice("Dashboard refreshed.");
     });
   }
 
@@ -107,7 +251,7 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    const next = await response.json();
+    const next = await readJsonResponse<Record<string, unknown>>(response);
     setData((current) => ({ ...current, profile: next }));
     setNotice("Profile saved.");
   }
@@ -124,27 +268,37 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
         metadata: {}
       })
     });
-    const next = await response.json();
+    const next = await readJsonResponse<DashboardData["credentials"][number]>(response);
     setData((current) => ({ ...current, credentials: [...current.credentials, next] }));
     setNotice("Credential stored.");
   }
 
   async function saveSource(formData: FormData) {
+    const provider = String(formData.get("provider") ?? "");
+    const sourceUrl = String(formData.get("sourceUrl") ?? "");
+    const countryCode = String(formData.get("countryCode") ?? "").trim().toUpperCase();
+    const validationError = validateSourceInput(provider, sourceUrl, countryCode);
+
+    if (validationError) {
+      setNotice(validationError);
+      return;
+    }
+
     const response = await fetch("/api/job-sources", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: formData.get("sourceName"),
-        provider: formData.get("provider"),
-        sourceUrl: formData.get("sourceUrl"),
+        provider,
+        sourceUrl,
         keywords: parseTags(String(formData.get("keywords") ?? "")),
         locations: parseTags(String(formData.get("locations") ?? "")),
         internshipOnly: true,
         maxDailyApplications: 10,
-        countryCode: formData.get("countryCode")
+        countryCode
       })
     });
-    const next = await response.json();
+    const next = await readJsonResponse<DashboardData["jobSources"][number]>(response);
     setData((current) => ({ ...current, jobSources: [...current.jobSources, next] }));
     setNotice("Job source saved and discovery queued.");
   }
@@ -162,38 +316,16 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
         maxDailyApplications: 10
       })
     });
-    const next = await response.json();
+    const next = await readJsonResponse<DashboardData["searchPresets"][number]>(response);
     setData((current) => ({ ...current, searchPresets: [...current.searchPresets, next] }));
     setNotice("Search preset saved.");
   }
 
-  async function toggleMode() {
-    const nextMode = data.user.submissionMode === "APPROVAL_FIRST" ? "AUTO_SUBMIT" : "APPROVAL_FIRST";
-    await fetch("/api/settings/submission-mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submissionMode: nextMode })
-    });
-    setData((current) => ({
-      ...current,
-      user: {
-        ...current.user,
-        submissionMode: nextMode
-      }
-    }));
-    setNotice(`Submission mode updated to ${nextMode}.`);
-  }
-
   async function generatePacket(jobId: string) {
-    await fetch(`/api/jobs/${jobId}/generate-packet`, { method: "POST" });
-    setNotice("Packet generation queued.");
-    refresh();
-  }
-
-  async function approveApplication(applicationId: string) {
-    await fetch(`/api/applications/${applicationId}/approve`, { method: "POST" });
-    setNotice("Application approved and submission queued.");
-    refresh();
+    const response = await fetch(`/api/jobs/${jobId}/generate-packet`, { method: "POST" });
+    await readJsonResponse(response);
+    await loadDashboardData();
+    setNotice("Resume and cover letter generation queued.");
   }
 
   return (
@@ -206,20 +338,14 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
                 Candidate profile
               </h1>
               <p className="muted">
-                This profile powers tailored resumes, cover letters, and form filling for {data.user.name ?? "your"} account.
+                This profile powers tailored resumes and cover letters for {data.user.name ?? "your"} account.
               </p>
             </div>
-            <button className="button secondary" onClick={toggleMode} type="button">
-              Mode: {data.user.submissionMode}
-            </button>
+            <div className="card" style={{ padding: "10px 14px" }}>Materials-only workflow</div>
           </div>
           <form
             className="stack"
-            action={(formData) =>
-              startTransition(async () => {
-                await saveProfile(formData);
-              })
-            }
+            action={(formData) => runAction("profile", "Saving profile...", () => saveProfile(formData))}
           >
             <div className="formRow" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
               <label className="label">
@@ -289,7 +415,7 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
               />
             </label>
             <button className="button" type="submit" disabled={pending}>
-              Save profile
+              {isActionPending("profile") ? "Saving profile..." : "Save profile"}
             </button>
           </form>
         </section>
@@ -298,11 +424,7 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
           <h2 className="sectionTitle">Search presets</h2>
           <form
             className="stack"
-            action={(formData) =>
-              startTransition(async () => {
-                await savePreset(formData);
-              })
-            }
+            action={(formData) => runAction("preset", "Saving search preset...", () => savePreset(formData))}
           >
             <label className="label">
               Preset name
@@ -321,11 +443,11 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
               <input className="input" name="presetLocations" placeholder="Remote, New York, Singapore" />
             </label>
             <button className="button secondary" type="submit" disabled={pending}>
-              Save preset
+              {isActionPending("preset") ? "Saving preset..." : "Save preset"}
             </button>
           </form>
           <ul className="list" style={{ marginTop: 16 }}>
-            {data.searchPresets.map((preset) => (
+            {visibleSearchPresets.map((preset) => (
               <li key={preset.id} className="listItem">
                 <strong>{preset.name}</strong>
                 <div className="metaRow">
@@ -334,6 +456,9 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
                 </div>
               </li>
             ))}
+            {data.searchPresets.length > MAX_ITEMS_PER_SECTION ? (
+              <li className="listItem muted">Showing the 5 most recent presets.</li>
+            ) : null}
           </ul>
         </section>
 
@@ -341,11 +466,7 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
           <h2 className="sectionTitle">ATS sources</h2>
           <form
             className="stack"
-            action={(formData) =>
-              startTransition(async () => {
-                await saveSource(formData);
-              })
-            }
+            action={(formData) => runAction("source", "Saving source and queueing discovery...", () => saveSource(formData))}
           >
             <div className="formRow" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
               <label className="label">
@@ -380,11 +501,11 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
               <input className="input" name="locations" placeholder="Singapore, Remote" />
             </label>
             <button className="button" type="submit" disabled={pending}>
-              Save source and queue discovery
+              {isActionPending("source") ? "Queueing discovery..." : "Save source and queue discovery"}
             </button>
           </form>
           <ul className="list" style={{ marginTop: 16 }}>
-            {data.jobSources.map((source) => (
+            {visibleJobSources.map((source) => (
               <li key={source.id} className="listItem">
                 <strong>{source.name}</strong>
                 <div className="metaRow">
@@ -393,65 +514,96 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
                 </div>
               </li>
             ))}
+            {data.jobSources.length > MAX_ITEMS_PER_SECTION ? (
+              <li className="listItem muted">Showing the 5 most recent sources.</li>
+            ) : null}
           </ul>
         </section>
       </div>
 
       <div className="stack">
         <section className="panel">
-          <h2 className="sectionTitle">Provider credentials</h2>
-          <form
-            className="stack"
-            action={(formData) =>
-              startTransition(async () => {
-                await saveCredential(formData);
-              })
-            }
-          >
-            <label className="label">
-              Provider
-              <input className="input" name="provider" required placeholder="GREENHOUSE" />
-            </label>
-            <label className="label">
-              Label
-              <input className="input" name="label" required placeholder="Greenhouse login" />
-            </label>
-            <label className="label">
-              Username / email
-              <input className="input" name="username" placeholder="you@example.com" />
-            </label>
-            <label className="label">
-              Secret / password
-              <input className="input" type="password" name="secret" required />
-            </label>
-            <button className="button" type="submit" disabled={pending}>
-              Store encrypted credential
+          <div className="metaRow" style={{ justifyContent: "space-between", marginBottom: 10 }}>
+            <div>
+              <h2 className="sectionTitle" style={{ marginBottom: 0 }}>
+                Worker activity
+              </h2>
+              <p className="muted">Recent discovery and materials-generation runs created by the worker.</p>
+            </div>
+            <button className="button secondary" onClick={refresh} type="button" disabled={pending}>
+              {isActionPending("refresh") ? "Refreshing..." : "Refresh"}
             </button>
-          </form>
-          <ul className="list" style={{ marginTop: 16 }}>
-            {data.credentials.map((credential) => (
-              <li key={credential.id} className="listItem">
-                <strong>{credential.label}</strong>
-                <div className="metaRow">
-                  <span>{credential.provider}</span>
-                  <span>{credential.username ?? "No username stored"}</span>
+          </div>
+          <ul className="list">
+            {visibleRuns.map((run) => (
+              <li key={run.id} className="listItem">
+                <strong>
+                  {formatRunType(run.runType)}: {run.jobTitle} at {run.companyName}
+                </strong>
+                <div className="metaRow" style={{ marginTop: 8 }}>
+                  <span>Status: {run.status}</span>
+                  <span>Started: {run.startedAt ? new Date(run.startedAt).toLocaleString() : "Queued"}</span>
+                  <span>{run.finishedAt ? `Finished: ${new Date(run.finishedAt).toLocaleString()}` : "In progress"}</span>
                 </div>
+                {run.tinyfishRunId ? (
+                  <div className="metaRow" style={{ marginTop: 8, justifyContent: "space-between" }}>
+                    <span className="muted">TinyFish run: {run.tinyfishRunId}</span>
+                    <button className="button secondary" type="button" onClick={() => setSelectedRunId(run.tinyfishRunId)}>
+                      Open live view
+                    </button>
+                  </div>
+                ) : null}
+                {run.errorMessage ? (
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    Error: {summarizeError(run.errorMessage)}
+                  </div>
+                ) : null}
               </li>
             ))}
+            {data.runs.length === 0 ? <li className="listItem muted">No worker activity yet. Add a source or generate a packet to create runs.</li> : null}
+            {data.runs.length > MAX_ITEMS_PER_SECTION ? <li className="listItem muted">Showing the 5 most recent runs.</li> : null}
           </ul>
         </section>
+
+        {selectedRun ? (
+          <section className="panel">
+            <div className="metaRow" style={{ justifyContent: "space-between", marginBottom: 10 }}>
+              <div>
+                <h2 className="sectionTitle" style={{ marginBottom: 0 }}>
+                  TinyFish live run
+                </h2>
+                <p className="muted">
+                  {formatRunType(selectedRun.runType)} for {selectedRun.jobTitle} at {selectedRun.companyName}
+                </p>
+              </div>
+              <a
+                className="button secondary"
+                href={getTinyFishStreamingUrl(selectedRun.tinyfishRunId ?? "")}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open in new tab
+              </a>
+            </div>
+            <iframe
+              title="TinyFish live run"
+              src={getTinyFishStreamingUrl(selectedRun.tinyfishRunId ?? "")}
+              style={{ width: "100%", minHeight: 520, border: 0, borderRadius: 16, background: "#0b1020" }}
+            />
+          </section>
+        ) : null}
 
         <section className="panel">
           <div className="metaRow" style={{ justifyContent: "space-between", marginBottom: 10 }}>
             <h2 className="sectionTitle" style={{ marginBottom: 0 }}>
               Matched jobs
             </h2>
-            <button className="button secondary" onClick={refresh} type="button">
-              Refresh
+            <button className="button secondary" onClick={refresh} type="button" disabled={pending}>
+              {isActionPending("refresh") ? "Refreshing..." : "Refresh"}
             </button>
           </div>
           <ul className="list">
-            {data.jobs.map((job) => (
+            {visibleJobs.map((job) => (
               <li key={job.id} className="listItem">
                 <strong>
                   {job.title} at {job.companyName}
@@ -461,35 +613,100 @@ export function DashboardShell({ initialData }: { initialData: DashboardData }) 
                   <span>Status: {job.status}</span>
                   <span>Match: {Math.round(job.internshipScore * 100)}%</span>
                 </div>
-                <button className="button secondary" style={{ marginTop: 10 }} type="button" onClick={() => generatePacket(job.id)}>
-                  Generate packet
-                </button>
+                {job.isSynthetic ? (
+                  <div className="muted" style={{ marginTop: 10 }}>
+                    Synthetic discovery record. Wait for real matched jobs before generating a packet.
+                  </div>
+                ) : (
+                  <button
+                    className="button secondary"
+                    style={{ marginTop: 10 }}
+                    type="button"
+                    onClick={() =>
+                      runAction(
+                        `packet:${job.id}`,
+                        `Queueing resume and cover letter generation for ${job.title}...`,
+                        () => generatePacket(job.id)
+                      )
+                    }
+                    disabled={pending}
+                  >
+                    {isActionPending(`packet:${job.id}`) ? "Queueing materials..." : "Generate materials"}
+                  </button>
+                )}
               </li>
             ))}
             {data.jobs.length === 0 ? <li className="listItem muted">No matched jobs yet. Add a source to start discovery.</li> : null}
+            {data.jobs.length > MAX_ITEMS_PER_SECTION ? <li className="listItem muted">Showing the 5 most recent matched jobs.</li> : null}
           </ul>
         </section>
 
         <section className="panel">
-          <h2 className="sectionTitle">Application queue</h2>
+          <h2 className="sectionTitle">Materials queue</h2>
           <ul className="list">
-            {data.applications.map((application) => (
+            {visibleApplications.map((application) => (
               <li key={application.id} className="listItem">
                 <strong>
                   {application.title} at {application.companyName}
                 </strong>
                 <div className="metaRow" style={{ marginTop: 8 }}>
-                  <span>Status: {application.status}</span>
+                  <span>Status: {formatMaterialsStatus(application.status)}</span>
                   <span>{new Date(application.createdAt).toLocaleString()}</span>
                 </div>
-                {application.status === "READY_FOR_REVIEW" ? (
-                  <button className="button secondary" style={{ marginTop: 10 }} type="button" onClick={() => approveApplication(application.id)}>
-                    Approve and submit
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {application.hasMaterials
+                    ? "Resume and cover letter generated."
+                    : application.status === "FAILED"
+                      ? "Generation failed before materials were created. Try again."
+                      : "Resume and cover letter are still being generated."}
+                </div>
+                {application.hasMaterials ? (
+                  <div className="metaRow" style={{ marginTop: 10, gap: 10 }}>
+                    <a
+                      className="button secondary"
+                      href={`/api/applications/${application.id}/materials/resume`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      View resume
+                    </a>
+                    <a
+                      className="button secondary"
+                      href={`/api/applications/${application.id}/materials/cover-letter`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      View cover letter
+                    </a>
+                  </div>
+                ) : null}
+                {application.status !== "PACKET_QUEUED" ? (
+                  <button
+                    className="button secondary"
+                    style={{ marginTop: 10 }}
+                    type="button"
+                    onClick={() =>
+                      runAction(
+                        `packet:${application.jobId}`,
+                        `Queueing resume and cover letter generation for ${application.title}...`,
+                        () => generatePacket(application.jobId)
+                      )
+                    }
+                    disabled={pending}
+                  >
+                    {isActionPending(`packet:${application.jobId}`)
+                      ? "Queueing materials..."
+                      : application.status === "FAILED"
+                        ? "Try again"
+                        : "Regenerate materials"}
                   </button>
                 ) : null}
               </li>
             ))}
-            {data.applications.length === 0 ? <li className="listItem muted">No application packets yet.</li> : null}
+            {data.applications.length === 0 ? <li className="listItem muted">No queued materials yet.</li> : null}
+            {data.applications.length > MAX_ITEMS_PER_SECTION ? (
+              <li className="listItem muted">Showing the 5 most recent queue items.</li>
+            ) : null}
           </ul>
         </section>
 

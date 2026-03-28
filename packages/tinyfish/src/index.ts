@@ -32,6 +32,8 @@ export type StartRunInput = {
   countryCode?: string;
 };
 
+const supportedProxyCountryCodes = new Set(["US", "GB", "CA", "DE", "FR", "JP", "AU"]);
+
 export class TinyFishClient {
   constructor(
     private readonly config?: {
@@ -41,14 +43,15 @@ export class TinyFishClient {
   ) {}
 
   async startExtractionRun(input: StartRunInput): Promise<string> {
+    const countryCode = normalizeProxyCountryCode(input.countryCode);
     const run = await this.post("/automation/run-async", {
       url: input.url,
       goal: input.goal,
       browser_profile: input.browserProfile ?? "lite",
-      proxy_config: input.countryCode
+      proxy_config: countryCode
         ? {
             enabled: true,
-            country_code: input.countryCode
+            country_code: countryCode
           }
         : undefined
     });
@@ -57,14 +60,15 @@ export class TinyFishClient {
   }
 
   async startApplyRun(input: StartRunInput): Promise<string> {
+    const countryCode = normalizeProxyCountryCode(input.countryCode);
     const run = await this.post("/automation/run-async", {
       url: input.url,
       goal: input.goal,
       browser_profile: input.browserProfile ?? "stealth",
-      proxy_config: input.countryCode
+      proxy_config: countryCode
         ? {
             enabled: true,
-            country_code: input.countryCode
+            country_code: countryCode
           }
         : undefined
     });
@@ -225,7 +229,10 @@ export class TinyFishClient {
   normalizeExtractionResult(result: unknown): { listings: JobListingExtraction[]; exhausted: boolean; nextPageUrl?: string | null } {
     const parsed = jobListingBatchResultSchema.parse(result);
     return {
-      listings: parsed.listings,
+      listings: parsed.listings.map((listing) => ({
+        ...listing,
+        compensation_hint: listing.compensation_hint ?? ""
+      })),
       exhausted: parsed.exhausted,
       nextPageUrl: parsed.next_page_url ?? null
     };
@@ -245,7 +252,7 @@ export class TinyFishClient {
     });
 
     if (!response.ok) {
-      throw new Error(`TinyFish request failed with status ${response.status}`);
+      throw await this.buildRequestError(response);
     }
 
     return response.json();
@@ -263,11 +270,42 @@ export class TinyFishClient {
     });
 
     if (!response.ok) {
-      throw new Error(`TinyFish request failed with status ${response.status}`);
+      throw await this.buildRequestError(response);
     }
 
     return response.json();
   }
+
+  private async buildRequestError(response: Response): Promise<Error> {
+    const contentType = response.headers.get("content-type") ?? "";
+    let details = "";
+
+    try {
+      if (contentType.includes("application/json")) {
+        const payload = await response.json();
+        details = JSON.stringify(payload);
+      } else {
+        details = (await response.text()).trim();
+      }
+    } catch {
+      details = "";
+    }
+
+    return new Error(
+      details
+        ? `TinyFish request failed with status ${response.status}: ${details}`
+        : `TinyFish request failed with status ${response.status}`
+    );
+  }
+}
+
+function normalizeProxyCountryCode(countryCode?: string): string | undefined {
+  if (!countryCode) {
+    return undefined;
+  }
+
+  const normalized = countryCode.trim().toUpperCase();
+  return supportedProxyCountryCodes.has(normalized) ? normalized : undefined;
 }
 
 export function materializeResumeProfile(profile: UserProfileInput, resume: ResumeSpec): UserProfileInput {

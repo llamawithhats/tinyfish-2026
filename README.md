@@ -1,20 +1,19 @@
 # AutoIntern
 
-TinyFish-powered internship application automation for ATS-hosted job pages. The stack is a Dockerized TypeScript monorepo with:
+TinyFish-powered internship discovery and materials generation for ATS-hosted job pages. The stack is a Dockerized TypeScript monorepo with:
 
 - `apps/web`: Next.js dashboard, prototype username/password auth, and queueing API routes
-- `apps/worker`: BullMQ workers for discovery, packet generation, and submission
+- `apps/worker`: BullMQ workers for discovery and packet generation
 - `packages/*`: shared domain contracts, env/config, TinyFish client, prompt builders, PDF renderer, and object storage helpers
 - `prisma/schema.prisma`: the multi-user data model for profiles, credentials, sources, jobs, packets, runs, and audit events
 
 ## What v1 does
 
-- Stores a structured candidate profile and encrypted ATS credentials
+- Stores a structured candidate profile
 - Watches user-defined ATS sources such as Greenhouse, Lever, Ashby, Workable, and generic hosted apply pages
 - Uses TinyFish async runs to scrape listings and application pages
-- Generates a truthful one-page ATS-safe resume, cover letter, and structured screening answers
-- Queues applications for review by default, with an explicit auto-submit account mode
-- Falls back to `MANUAL_ACTION_REQUIRED` on CAPTCHA, MFA, broken uploaders, and unsupported flows
+- Generates a truthful one-page ATS-safe resume and cover letter for matched jobs
+- Queues generated materials for review in a simple materials queue
 
 ## Resume constraints
 
@@ -71,11 +70,8 @@ npm run docker:down
 ## Key API routes
 
 - `POST` / `PUT` `/api/profile`
-- `POST /api/credentials`
 - `POST /api/search-presets`
 - `POST /api/job-sources`
 - `GET /api/jobs`
 - `GET /api/applications`
 - `POST /api/jobs/:id/generate-packet`
-- `POST /api/applications/:id/approve`
-- `POST /api/settings/submission-mode`

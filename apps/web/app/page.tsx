@@ -12,12 +12,12 @@ export default async function HomePage() {
     <main className="shell">
       <section className="hero">
         <div>
-          <p className="pill">TinyFish-powered ATS automation</p>
-          <h1 className="headline">Apply to better internships with less repetitive work.</h1>
+          <p className="pill">TinyFish-powered internship discovery</p>
+          <h1 className="headline">Generate stronger internship materials with less repetitive work.</h1>
           <p className="lede">
             AutoIntern watches the internship sources you care about, scrapes the job description, generates a truthful
-            one-page resume and cover letter, prepares screening answers, and either queues the application for review or
-            submits it automatically.
+            one-page resume and cover letter, prepares screening answers, and keeps every generated packet in a simple
+            review queue.
           </p>
           <div className="ctaRow">
             <Link className="button" href="/signin">
@@ -62,8 +62,8 @@ export default async function HomePage() {
             <p className="muted">Each listing gets a tailored resume, cover letter, and screening answer set.</p>
           </div>
           <div className="card">
-            <strong>4. Submit with control</strong>
-            <p className="muted">Choose approval-first review or explicit auto-submit for supported flows.</p>
+            <strong>4. Review materials</strong>
+            <p className="muted">Keep generated packets in a focused queue so you can review and apply manually.</p>
           </div>
         </div>
       </section>

@@ -1,11 +1,15 @@
 import { ApplicationRunType, JobListingStatus } from "@prisma/client";
 import { generateStructuredObject } from "@autointern/llm";
 import { pruneResumeSpecToOnePage, renderPdfFromHtml, renderResumeHtml } from "@autointern/pdf";
-import { buildAnswerMessages, buildCoverLetterMessages, buildResumeMessages } from "@autointern/prompts";
+import { buildCoverLetterMessages, buildResumeMessages } from "@autointern/prompts";
 import { uploadBuffer, uploadJson } from "@autointern/storage";
-import { generatedPacketSchema, resumeSpecSchema, type UserProfileInput } from "@autointern/domain";
+import { resumeSpecSchema, type UserProfileInput } from "@autointern/domain";
 import { prisma } from "../prisma";
-import { submitApplicationQueue } from "../queues";
+import { z } from "zod";
+
+const coverLetterDraftSchema = z.object({
+  coverLetter: z.string().min(1)
+});
 
 function coerceProfile(input: unknown): UserProfileInput {
   return input as UserProfileInput;
@@ -81,45 +85,33 @@ export async function generateApplicationPacket(jobListingId: string) {
       compensation_hint: listing.compensationHint ?? ""
     });
 
-    const answerPrompt = buildAnswerMessages(profile, {
-      external_id: listing.externalId ?? undefined,
-      title: listing.title,
-      company_name: listing.companyName,
-      location: listing.location ?? "",
-      internship_relevance_score: listing.internshipScore,
-      canonical_application_url: listing.canonicalApplicationUrl,
-      job_description_markdown: listing.descriptionMarkdown,
-      matching_keywords: listing.matchingKeywords,
-      compensation_hint: listing.compensationHint ?? ""
-    });
-
-    const generatedPacket = await generateStructuredObject({
-      schema: generatedPacketSchema,
+    const coverLetterDraft = await generateStructuredObject({
+      schema: coverLetterDraftSchema,
       messages: [
         {
           role: "system",
-          content: `${coverLetterPrompt.system}\n${answerPrompt.system}`
+          content: coverLetterPrompt.system
         },
         {
           role: "user",
-          content: `${coverLetterPrompt.user}\n\n${answerPrompt.user}`
+          content: coverLetterPrompt.user
         }
       ]
     });
 
     const resumeHtml = renderResumeHtml(resume);
     const resumePdf = await renderPdfFromHtml(resumeHtml);
-    const screeningAnswers = generatedPacket.screeningAnswers ?? [];
-    const essayResponses = generatedPacket.essayResponses ?? [];
+    const screeningAnswers: [] = [];
+    const essayResponses: [] = [];
     const resumeKey = `users/${listing.userId}/packets/${listing.id}/resume.pdf`;
     const coverLetterKey = `users/${listing.userId}/packets/${listing.id}/cover-letter.txt`;
     const answersKey = `users/${listing.userId}/packets/${listing.id}/answers.json`;
 
     await uploadBuffer(resumeKey, resumePdf, "application/pdf");
-    await uploadBuffer(coverLetterKey, Buffer.from(generatedPacket.coverLetter, "utf8"), "text/plain; charset=utf-8");
+    await uploadBuffer(coverLetterKey, Buffer.from(coverLetterDraft.coverLetter, "utf8"), "text/plain; charset=utf-8");
     await uploadJson(answersKey, {
-      screeningAnswers: generatedPacket.screeningAnswers,
-      essayResponses: generatedPacket.essayResponses
+      screeningAnswers,
+      essayResponses
     });
 
     const packet = await prisma.applicationPacket.upsert({
@@ -128,7 +120,7 @@ export async function generateApplicationPacket(jobListingId: string) {
         userId: listing.userId,
         jobListingId: listing.id,
         resumeSpec: resume,
-        coverLetterText: generatedPacket.coverLetter,
+        coverLetterText: coverLetterDraft.coverLetter,
         screeningAnswers,
         essayResponses,
         resumeObjectKey: resumeKey,
@@ -137,7 +129,7 @@ export async function generateApplicationPacket(jobListingId: string) {
       },
       update: {
         resumeSpec: resume,
-        coverLetterText: generatedPacket.coverLetter,
+        coverLetterText: coverLetterDraft.coverLetter,
         screeningAnswers,
         essayResponses,
         resumeObjectKey: resumeKey,
@@ -149,7 +141,7 @@ export async function generateApplicationPacket(jobListingId: string) {
     await prisma.jobListing.update({
       where: { id: listing.id },
       data: {
-        status: listing.user.submissionMode === "AUTO_SUBMIT" ? JobListingStatus.APPLYING : JobListingStatus.READY_FOR_REVIEW
+        status: JobListingStatus.READY_FOR_REVIEW
       }
     });
 
@@ -166,21 +158,6 @@ export async function generateApplicationPacket(jobListingId: string) {
         }
       }
     });
-
-    if (listing.user.submissionMode === "AUTO_SUBMIT") {
-      await submitApplicationQueue.add(
-        "submit-application",
-        { applicationPacketId: packet.id },
-        {
-          removeOnComplete: 100,
-          attempts: 2,
-          backoff: {
-            type: "exponential",
-            delay: 5_000
-          }
-        }
-      );
-    }
   } catch (error) {
     await prisma.jobListing.update({
       where: { id: listing.id },
